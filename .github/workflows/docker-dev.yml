@@ -110,9 +110,9 @@ jobs:
       - name: 🧹 Cleanup old Docker images
         run: |
           echo "🧹 Removing dangling images..."
-          docker image prune -f
-      
-      
+          sudo docker container prune -f
+          sudo docker image prune -f
+
       - name: Show running containers
         run: docker ps
 
