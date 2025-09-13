@@ -7,7 +7,6 @@ import librosa
 import numpy as np
 import soundfile as sf
 import websockets
-import yaml
 from dotenv import load_dotenv
 
 load_dotenv()
