@@ -20,7 +20,7 @@ jobs:
 
           # Set fallback defaults
           HOST_DEFAULT="0.0.0.0"
-          PORT_DEFAULT="8000"
+          PORT_DEFAULT="5001"
 
           export HOST="$HOST_DEFAULT"
           export PORT="$PORT_DEFAULT"
@@ -56,13 +56,13 @@ jobs:
 
       - name: Build Docker image
         run: |
-          docker build --no-cache -t vad-server:latest .
+          docker build --no-cache -t stt-server:latest .
       
       - name: Stop and remove previous container (optional)
         run: |
-          if [ $(docker ps -a -q -f name=vad-server-container) ]; then
-            docker stop vad-server-container || true
-            docker rm vad-server-container || true
+          if [ $(docker ps -a -q -f name=stt-server-container) ]; then
+            docker stop stt-server-container || true
+            docker rm stt-server-container || true
           fi
 
       - name: 🧹 Kill existing container using port ${{ env.PORT }}
@@ -100,12 +100,10 @@ jobs:
           echo "Starting container with HOST=${{ env.HOST }} PORT=${{ env.PORT }}"
           docker run -d \
             --gpus all \
-            --name vad-server-container \
+            --name stt-server-container \
             --restart unless-stopped \
-            -p "${{ env.PORT }}:${{ env.PORT }}" \
-            -e HOST="${{ env.HOST }}" \
-            -e PORT="${{ env.PORT }}" \
-            vad-server:latest
+            -p "${{ env.PORT }}":8000 \
+            stt-server:latest
       
       
             
@@ -121,7 +119,7 @@ jobs:
       - name: Output container logs (optional, for debugging)
         run: |
           sleep 5
-          docker logs vad-server-container
+          docker logs stt-server-container
 
 
 
@@ -142,9 +140,9 @@ jobs:
         run: |
           pip install websockets librosa soundfile numpy
 
-      - name: 🧪 Run VAD WebSocket Test
+      - name: 🧪 Run stt WebSocket Test
         run: |
-          echo "Testing VAD server at ws://${{ env.HOST }}:${{ env.PORT }}/ws/vad"
+          echo "Testing stt server at ws://${{ env.HOST }}:${{ env.PORT }}/ws/stt"
           python test.py
   
   
