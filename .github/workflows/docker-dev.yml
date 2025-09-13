@@ -138,7 +138,7 @@ jobs:
 
       - name: 📦 Install dependencies
         run: |
-          poetry run pip install websockets librosa soundfile numpy
+          poetry run pip install websockets librosa soundfile numpy python-dotenv
 
       - name: 🧪 Run stt WebSocket Test
         run: |
