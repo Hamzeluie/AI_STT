@@ -143,7 +143,7 @@ jobs:
       - name: 🧪 Run stt WebSocket Test
         run: |
           echo "Testing stt server at ws://${{ env.HOST }}:${{ env.PORT }}/ws/stt"
-          python test.py
+          poetry run python test.py
   
   
   
