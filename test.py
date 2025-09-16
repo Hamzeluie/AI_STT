@@ -16,7 +16,6 @@ load_dotenv()
 WEBSOCKET_URL = (
     f"ws://{os.getenv('HOST', 'localhost')}:{int(os.getenv('PORT', 5001))}/ws/stt"
 )
-WEBSOCKET_URL = "ws://localhost:5001/ws/stt"
 
 
 # Function to generate dummy audio data (sine wave)
