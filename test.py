@@ -14,7 +14,7 @@ load_dotenv()
 
 # WebSocket server URL
 WEBSOCKET_URL = (
-    f"ws://{os.getenv('HOST', 'localhost')}:{int(os.getenv('PORT', 5001))}/ws/stt"
+    f"ws://{os.getenv('HOST', 'localhost')}:{int(os.getenv('TEST_PORT', 8000))}/ws/stt"
 )
 
 
