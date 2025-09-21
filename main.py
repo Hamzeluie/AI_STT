@@ -202,6 +202,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
 @app.websocket(f"/ws/stt")
 async def openai_realtime_websocket_endpoint(websocket: WebSocket):
     await websocket.accept()

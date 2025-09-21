@@ -3,6 +3,7 @@ FROM nvidia/cuda:12.4.0-devel-ubuntu22.04
 
 # Install Python and deps
 RUN apt-get update && apt-get install -y \
+    curl \
     python3.10 \
     python3.10-dev \
     python3-pip \
