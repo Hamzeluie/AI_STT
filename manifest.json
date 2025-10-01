@@ -1,0 +1,26 @@
+{
+  "name": "speech_to_text_tool",
+  "description": "Realtime speech transcription tool via FasterWhisper over WebSocket.",
+  "version": "0.1.0",
+  "tools": [
+    {
+      "name": "transcribe_audio",
+      "description": "Send raw audio chunks and get transcription.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "audio": {
+            "type": "array",
+            "items": { "type": "integer" },
+            "description": "PCM16 audio buffer"
+          },
+          "sample_rate": {
+            "type": "integer",
+            "default": 16000
+          }
+        },
+        "required": ["audio"]
+      }
+    }
+  ]
+}
