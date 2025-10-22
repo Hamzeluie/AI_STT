@@ -1,6 +1,5 @@
 import os
 import sys
-print(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from AI_VAD.models.abstract_models import *
 
@@ -116,7 +115,8 @@ class RedisQueueManager(AbstractQueueManagerServer):
             status_obj.status = "stop"
             await self.redis_client.hset(self.active_sessions_key, req.sid, status_obj.to_json())
             return False
-        
+        elif status_obj.status == b"interrupt":
+            return False
         # update create_at time of the session
         status_obj.refresh_time()
         await self.redis_client.hset(self.active_sessions_key, req.sid, status_obj.to_json())
