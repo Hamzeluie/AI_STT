@@ -103,13 +103,18 @@ class RedisQueueManager(AbstractQueueManagerServer):
         for channel_name in self.channels_name:
             await self.pubsub.subscribe(channel_name)
         logger.info(f"Redis queue manager initialized for queue: {self.queue_name}")
-        
+    
+    async def get_status_object(self, sid:str)-> SessionStatus:
+        raw = await self.redis_client.hget(self.active_sessions_key, sid)
+        if raw is None:
+            return None
+        return SessionStatus.from_json(raw)
+    
     async def is_session_active(self, req: Features) -> bool:
         """Check if a session is active"""
-        raw = await self.redis_client.hget(self.active_sessions_key, req.sid)
-        if raw is None:
+        status_obj = await self.get_status_object(req.sid)
+        if status_obj is None:
             return False
-        status_obj = SessionStatus.from_json(raw)
         # change status of the session to 'stop' if the session expired
         if status_obj.is_expired():
             status_obj.status = "stop"
@@ -117,9 +122,6 @@ class RedisQueueManager(AbstractQueueManagerServer):
             return False
         elif status_obj.status == b"interrupt":
             return False
-        # update create_at time of the session
-        status_obj.refresh_time()
-        await self.redis_client.hset(self.active_sessions_key, req.sid, status_obj.to_json())
         return True
 
     async def get_data_batch(self, max_batch_size: int = 8, max_wait_time: float = 0.1) -> List[AudioFeatures]:
@@ -152,6 +154,9 @@ class RedisQueueManager(AbstractQueueManagerServer):
     
     async def push_result(self, result: TextFeatures, channel_name:str, error: str = None):
         """Push inference result back to Redis pub/sub"""
+        status_obj = await self.get_status_object(result.sid)
+        status_obj.refresh_time()
+        await self.redis_client.hset(self.active_sessions_key, result.sid, status_obj.to_json())
         await self.redis_client.lpush(channel_name, result.to_json())
         logger.info(f"Result pushed for request {result.sid}")
    
@@ -187,26 +192,27 @@ class InferenceService(AbstractInferenceServer):
     async def _process_batches_loop(self):
         logger.info("Starting batch processing loop")
         while self.is_running:
-        # try:
-            batch = await self.queue_manager.get_data_batch(
-                max_batch_size=self.batch_manager.max_batch_size,
-                max_wait_time=self.batch_manager.max_wait_time
-            )
-            if batch:
-                start_time = time.time()
-                batch_results = await self.inference_engine.process_batch(batch)
-                processing_time = time.time() - start_time
-                for result_object in batch_results:
-                    if await self.is_session_active(result_object):
-                        await self.queue_manager.push_result(result=result_object, channel_name=result_object.priority)
-                    
-                self.batch_manager.update_metrics(len(batch), processing_time)
-                logger.info(f"Processed batch of {len(batch)} requests in {processing_time:.3f}s")
-            else:
-                await asyncio.sleep(0.01)
-            
-        # except Exception as e:
-        #     logger.error(f"Error in batch processing loop: {e}")
-        #     await asyncio.sleep(0.1)
+            try:
+                batch = await self.queue_manager.get_data_batch(
+                    max_batch_size=self.batch_manager.max_batch_size,
+                    max_wait_time=self.batch_manager.max_wait_time
+                )
+                if batch:
+                    start_time = time.time()
+                    batch_results = await self.inference_engine.process_batch(batch)
+                    processing_time = time.time() - start_time
+                    for result_object in batch_results:
+                        if await self.is_session_active(result_object):
+                            # update create_at time of the session
+                            await self.queue_manager.push_result(result=result_object, channel_name=result_object.priority)
+                        
+                    self.batch_manager.update_metrics(len(batch), processing_time)
+                    logger.info(f"Processed batch of {len(batch)} requests in {processing_time:.3f}s")
+                else:
+                    await asyncio.sleep(0.01)
+                
+            except Exception as e:
+                logger.error(f"Error in batch processing loop: {e}")
+                await asyncio.sleep(0.1)
 
   
