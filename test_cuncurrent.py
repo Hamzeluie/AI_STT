@@ -48,7 +48,7 @@ async def publish_requests(redis_client, wav_files: List[Path], num_sessions: in
 
     # Mark sessions as active
     for sid in sids:
-        await redis_client.hset(ACTIVE_SESSIONS_KEY, sid, SessionStatus(sid=sid,status="interrupt", created_at=None, timeout=None).to_json())
+        await redis_client.hset(ACTIVE_SESSIONS_KEY, sid, SessionStatus(sid=sid,status="interrupt", created_at=None, timeout=30.).to_json())
 
     tasks = []
     for idx, wav_file in enumerate(wav_files):
@@ -59,7 +59,6 @@ async def publish_requests(redis_client, wav_files: List[Path], num_sessions: in
         audio_feat = AudioFeatures(
             sid=sid,
             audio=audio_b64,
-            timeout=100000,
             sample_rate=16000,
             priority= f"VAD:{priority}",
             created_at=None

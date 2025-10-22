@@ -78,7 +78,7 @@ class WhisperAsyncBatchInference(AbstractAsyncModelInference):
                 language='en')
             output_text = "".join([s.text for s in segments]).strip()
             if len(output_text):
-                results.append(TextFeatures(sid=audio_object.sid, text=output_text, priority=audio_object.priority, created_at=None, timeout=None))
+                results.append(TextFeatures(sid=audio_object.sid, text=output_text, priority=audio_object.priority, created_at=None))
         return results
                 
 class RedisQueueManager(AbstractQueueManagerServer):
@@ -111,7 +111,7 @@ class RedisQueueManager(AbstractQueueManagerServer):
             return False
         status_obj = SessionStatus.from_json(raw)
         # change status of the session to 'stop' if the session expired
-        if status_obj.is_exired():
+        if status_obj.is_expired():
             status_obj.status = "stop"
             await self.redis_client.hset(self.active_sessions_key, req.sid, status_obj.to_json())
             return False
@@ -187,26 +187,26 @@ class InferenceService(AbstractInferenceServer):
     async def _process_batches_loop(self):
         logger.info("Starting batch processing loop")
         while self.is_running:
-            try:
-                batch = await self.queue_manager.get_data_batch(
-                    max_batch_size=self.batch_manager.max_batch_size,
-                    max_wait_time=self.batch_manager.max_wait_time
-                )
-                if batch:
-                    start_time = time.time()
-                    batch_results = await self.inference_engine.process_batch(batch)
-                    processing_time = time.time() - start_time
-                    for result_object in batch_results:
-                        if self.is_session_active(result_object):
-                            await self.queue_manager.push_result(result=result_object, channel_name=result_object.priority)
-                        
-                    self.batch_manager.update_metrics(len(batch), processing_time)
-                    logger.info(f"Processed batch of {len(batch)} requests in {processing_time:.3f}s")
-                else:
-                    await asyncio.sleep(0.01)
-                
-            except Exception as e:
-                logger.error(f"Error in batch processing loop: {e}")
-                await asyncio.sleep(0.1)
+        # try:
+            batch = await self.queue_manager.get_data_batch(
+                max_batch_size=self.batch_manager.max_batch_size,
+                max_wait_time=self.batch_manager.max_wait_time
+            )
+            if batch:
+                start_time = time.time()
+                batch_results = await self.inference_engine.process_batch(batch)
+                processing_time = time.time() - start_time
+                for result_object in batch_results:
+                    if await self.is_session_active(result_object):
+                        await self.queue_manager.push_result(result=result_object, channel_name=result_object.priority)
+                    
+                self.batch_manager.update_metrics(len(batch), processing_time)
+                logger.info(f"Processed batch of {len(batch)} requests in {processing_time:.3f}s")
+            else:
+                await asyncio.sleep(0.01)
+            
+        # except Exception as e:
+        #     logger.error(f"Error in batch processing loop: {e}")
+        #     await asyncio.sleep(0.1)
 
   
