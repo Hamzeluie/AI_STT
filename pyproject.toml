@@ -31,3 +31,6 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 package-mode = false
+[tool.poetry.dependencies]
+redis = {version = ">=3.9", markers = "python_version >= \"3.10\""}
+pydub = "^0.25.1"
