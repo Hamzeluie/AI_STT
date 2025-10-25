@@ -86,29 +86,26 @@ class RedisQueueManager(AbstractQueueManagerServer):
     Manages Redis-based async queue for inference requests
     """
     
-    def __init__(self, redis_url: str = "redis://localhost:6379", queue_name: str = "call_agent"):
+    def __init__(self, redis_url: str = "redis://localhost:6379", queue_name: str = "call_agent", service_name:str="STT", priorities:List[str]=["high", "low"]):
         self.redis_url = redis_url
-        self.channels_name = call_channels.get_all_channels()
+        self.priorities = priorities
+        self.service_name = service_name
         self.redis_client = None
         self.pubsub = None
         self.queue_name = queue_name
         self.active_sessions_key = f"{queue_name}:active_sessions"
-        self.priorities = get_high_low(call_channels.output_channel)
-        self.in_priorities = get_high_low(call_channels.input_channel)
+        self.input_channels:List = [f"{self.service_name}:high", f"{self.service_name}:low"]
 
     async def initialize(self):
         """Initialize Redis connection"""
         self.redis_client = await redis.from_url(self.redis_url, decode_responses=False)
-        self.pubsub = self.redis_client.pubsub()
-        for channel_name in self.channels_name:
-            await self.pubsub.subscribe(channel_name)
         logger.info(f"Redis queue manager initialized for queue: {self.queue_name}")
     
-    async def get_status_object(self, sid:str)-> SessionStatus:
+    async def get_status_object(self, sid:str)-> AgentSessions:
         raw = await self.redis_client.hget(self.active_sessions_key, sid)
         if raw is None:
             return None
-        return SessionStatus.from_json(raw)
+        return AgentSessions.from_json(raw)
     
     async def is_session_active(self, req: Features) -> bool:
         """Check if a session is active"""
@@ -117,10 +114,10 @@ class RedisQueueManager(AbstractQueueManagerServer):
             return False
         # change status of the session to 'stop' if the session expired
         if status_obj.is_expired():
-            status_obj.status = "stop"
+            status_obj.status = SessionStatus.STOP
             await self.redis_client.hset(self.active_sessions_key, req.sid, status_obj.to_json())
             return False
-        elif status_obj.status == b"interrupt":
+        elif status_obj.status == SessionStatus.INTERRUPT:
             return False
         return True
 
@@ -132,9 +129,12 @@ class RedisQueueManager(AbstractQueueManagerServer):
             if elapsed >= max_wait_time and batch:
                 break
             
-            result = await self.redis_client.brpop(self.in_priorities["high"], timeout=0.01)
-            if not result:
-                result = await self.redis_client.brpop(self.in_priorities["low"], timeout=0.01)
+            
+            for input_channel in self.input_channels:
+                result = await self.redis_client.brpop(input_channel, timeout=0.01)
+                if result:
+                    break
+            
             
             if result:
                 _, request_json = result
@@ -143,7 +143,6 @@ class RedisQueueManager(AbstractQueueManagerServer):
                     if not await self.is_session_active(req):
                         logger.info(f"Skipped request for stopped session: {req.sid}")
                         continue
-                    req.priority = transform_priority_name(self.priorities, req.priority)
                     batch.append(req)
                 except Exception as e:
                     logger.error(f"Error in get_data_batch: {e}", exc_info=True)
@@ -152,13 +151,19 @@ class RedisQueueManager(AbstractQueueManagerServer):
 
         return batch
     
-    async def push_result(self, result: TextFeatures, channel_name:str, error: str = None):
+    async def push_result(self, result: TextFeatures):
         """Push inference result back to Redis pub/sub"""
         status_obj = await self.get_status_object(result.sid)
         status_obj.refresh_time()
         await self.redis_client.hset(self.active_sessions_key, result.sid, status_obj.to_json())
-        await self.redis_client.lpush(channel_name, result.to_json())
-        logger.info(f"Result pushed for request {result.sid}")
+        # calculate next service and queue name
+        next_service = go_next_service(current_stage_name=self.service_name,
+                        service_names=status_obj.service_names,
+                        channels_steps=status_obj.channels_steps,
+                        last_channel=status_obj.last_channel,
+                        prioriry=result.priority)
+        await self.redis_client.lpush(next_service, result.to_json())
+        logger.info(f"Result pushed for request {result.sid}, to {next_service}")
    
    
 class InferenceService(AbstractInferenceServer):
@@ -204,7 +209,7 @@ class InferenceService(AbstractInferenceServer):
                     for result_object in batch_results:
                         if await self.is_session_active(result_object):
                             # update create_at time of the session
-                            await self.queue_manager.push_result(result=result_object, channel_name=result_object.priority)
+                            await self.queue_manager.push_result(result=result_object)
                         
                     self.batch_manager.update_metrics(len(batch), processing_time)
                     logger.info(f"Processed batch of {len(batch)} requests in {processing_time:.3f}s")

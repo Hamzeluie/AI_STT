@@ -24,6 +24,15 @@ logger = logging.getLogger(__name__)
 INPUT_CHANNELS = ["VAD:high", "VAD:low"]
 OUTPUT_CHANNELS = ["STT:high", "STT:low"]
 
+
+SAMPLE_RATE = int(os.getenv("VAD_SAMPLE_RATE", 16000))
+AGENT_NAME = "CALL"
+SERVICE_NAMES = ["VAD","STT","RAG","TTS"]
+CHANNEL_STEPS = {"VAD":["input"],"STT":["high", "low"], "RAG":["high", "low"],"TTS":["high","low"]}
+INPUT_CHANNEL =f"{SERVICE_NAMES[0]}:{CHANNEL_STEPS[SERVICE_NAMES[0]][0]}"
+OUTPUT_CHANNEL = f"{AGENT_NAME.lower()}:output"
+
+
 # Session timeout key (must match your service)
 ACTIVE_SESSIONS_KEY = "call_agent:active_sessions"
 
@@ -48,7 +57,15 @@ async def publish_requests(redis_client, wav_files: List[Path], num_sessions: in
 
     # Mark sessions as active
     for sid in sids:
-        await redis_client.hset(ACTIVE_SESSIONS_KEY, sid, SessionStatus(sid=sid,status="interrupt", created_at=None, timeout=30.).to_json())
+        agent_session = AgentSessions(sid=sid,
+                      agent_name=AGENT_NAME, 
+                      service_names=SERVICE_NAMES,
+                      channels_steps=CHANNEL_STEPS,
+                      status=SessionStatus.ACTIVE,
+                      first_channel=INPUT_CHANNEL,
+                      last_channel=OUTPUT_CHANNEL,
+                      timeout=3000)
+        await redis_client.hset(ACTIVE_SESSIONS_KEY, sid, agent_session.to_json())
 
     tasks = []
     for idx, wav_file in enumerate(wav_files):
@@ -60,10 +77,10 @@ async def publish_requests(redis_client, wav_files: List[Path], num_sessions: in
             sid=sid,
             audio=audio_b64,
             sample_rate=16000,
-            priority= f"VAD:{priority}",
+            priority= f"{priority}",
             created_at=None
         )
-        channel = f"VAD:{priority}"
+        channel = f"STT:{priority}"
         logger.info(f"Publishing {wav_file.name} (sid={sid}, priority={priority}) to {channel}, create_at {audio_feat.created_at}")
         tasks.append(redis_client.lpush(channel, audio_feat.to_json()))
 
@@ -101,8 +118,8 @@ async def listen_for_results(redis_client, expected_count: int, timeout: int = 6
 
 
 async def main(timeout: int = 60):
-    # input_dir = "/home/mehdi/Documents/projects/tts/test/test_wav"
-    input_dir = "/home/mehdi/Documents/projects/tts/tmp/corrupted"
+    input_dir = "/home/mehdi/Documents/projects/tts/test/test_wav"
+    # input_dir = "/home/mehdi/Documents/projects/tts/tmp/corrupted"
     input_path = Path(input_dir)
     if not input_path.is_dir():
         raise ValueError(f"Input directory does not exist: {input_dir}")
