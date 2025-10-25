@@ -219,5 +219,3 @@ class InferenceService(AbstractInferenceServer):
             except Exception as e:
                 logger.error(f"Error in batch processing loop: {e}")
                 await asyncio.sleep(0.1)
-
-  
