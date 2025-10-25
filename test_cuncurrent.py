@@ -33,6 +33,7 @@ INPUT_CHANNEL =f"{SERVICE_NAMES[0]}:{CHANNEL_STEPS[SERVICE_NAMES[0]][0]}"
 OUTPUT_CHANNEL = f"{AGENT_NAME.lower()}:output"
 
 
+
 # Session timeout key (must match your service)
 ACTIVE_SESSIONS_KEY = "call_agent:active_sessions"
 
@@ -58,6 +59,9 @@ async def publish_requests(redis_client, wav_files: List[Path], num_sessions: in
     # Mark sessions as active
     for sid in sids:
         agent_session = AgentSessions(sid=sid,
+                      owner_id="",
+                      kb_id=[],
+                      kb_limit=5,
                       agent_name=AGENT_NAME, 
                       service_names=SERVICE_NAMES,
                       channels_steps=CHANNEL_STEPS,

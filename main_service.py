@@ -165,7 +165,6 @@ class RedisQueueManager(AbstractQueueManagerServer):
         await self.redis_client.lpush(next_service, result.to_json())
         logger.info(f"Result pushed for request {result.sid}, to {next_service}")
    
-   
 class InferenceService(AbstractInferenceServer):
     def __init__(
         self,
