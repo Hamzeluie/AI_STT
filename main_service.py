@@ -1,40 +1,20 @@
-import os
-import sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from AI_VAD.models.abstract_models import *
-
-
-import base64
-import numpy as np
-from faster_whisper import WhisperModel, BatchedInferencePipeline
-import base64
-import logging
-import numpy as np
 import time
+import base64
+import numpy as np
 import redis.asyncio as redis
-from typing import Any, Dict, List
-from concurrent.futures import ThreadPoolExecutor
-from abc import ABC, abstractmethod
+from typing import List
+import asyncio
+from agent_architect.models_abstraction import AbstractAsyncModelInference, AbstractQueueManagerServer, AbstractInferenceServer, DynamicBatchManager
+from agent_architect.datatype_abstraction import AudioFeatures, Features, TextFeatures
+from agent_architect.session_abstraction import AgentSessions, SessionStatus
+from agent_architect.utils import go_next_service
+import logging
 from faster_whisper import WhisperModel, BatchedInferencePipeline
-from dataclasses import dataclass
-
-@dataclass
-class SttFeatures(Features):
-    payload: Dict[str, Any]
-
-
-import base64
-import numpy as np
-import time
-from typing import Any, Dict, List
-from faster_whisper import WhisperModel, BatchedInferencePipeline
-
 
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)  
-call_channels = ChannelNames(input_channel=["VAD:high", "VAD:low"], output_channel=["STT:high", "STT:low"])
-    
+
     
 class WhisperAsyncBatchInference(AbstractAsyncModelInference):
     """
@@ -78,7 +58,7 @@ class WhisperAsyncBatchInference(AbstractAsyncModelInference):
                 language='en')
             output_text = "".join([s.text for s in segments]).strip()
             if len(output_text):
-                results.append(TextFeatures(sid=audio_object.sid, text=output_text, priority=audio_object.priority, created_at=None))
+                results.append(TextFeatures(sid=audio_object.sid, agent_name= audio_object.agent_name, text=output_text, priority=audio_object.priority, created_at=None))
         return results
                 
 class RedisQueueManager(AbstractQueueManagerServer):
@@ -86,36 +66,34 @@ class RedisQueueManager(AbstractQueueManagerServer):
     Manages Redis-based async queue for inference requests
     """
     
-    def __init__(self, redis_url: str = "redis://localhost:6379", queue_name: str = "call_agent", service_name:str="STT", priorities:List[str]=["high", "low"]):
+    def __init__(self, redis_url: str = "redis://localhost:6379", service_name:str="STT", priorities:List[str]=["high", "low"]):
         self.redis_url = redis_url
         self.priorities = priorities
         self.service_name = service_name
         self.redis_client = None
         self.pubsub = None
-        self.queue_name = queue_name
-        self.active_sessions_key = f"{queue_name}:active_sessions"
+        self.active_sessions_key = f"active_sessions"
         self.input_channels:List = [f"{self.service_name}:high", f"{self.service_name}:low"]
 
     async def initialize(self):
         """Initialize Redis connection"""
         self.redis_client = await redis.from_url(self.redis_url, decode_responses=False)
-        logger.info(f"Redis queue manager initialized for queue: {self.queue_name}")
     
-    async def get_status_object(self, sid:str)-> AgentSessions:
-        raw = await self.redis_client.hget(self.active_sessions_key, sid)
+    async def get_status_object(self, req:Features)-> AgentSessions:
+        raw = await self.redis_client.hget(f"{req.agent_name}:{self.active_sessions_key}", req.sid)
         if raw is None:
             return None
         return AgentSessions.from_json(raw)
     
     async def is_session_active(self, req: Features) -> bool:
         """Check if a session is active"""
-        status_obj = await self.get_status_object(req.sid)
+        status_obj = await self.get_status_object(req)
         if status_obj is None:
             return False
         # change status of the session to 'stop' if the session expired
         if status_obj.is_expired():
             status_obj.status = SessionStatus.STOP
-            await self.redis_client.hset(self.active_sessions_key, req.sid, status_obj.to_json())
+            await self.redis_client.hset(f"{req.agent_name}:{self.active_sessions_key}", req.sid, status_obj.to_json())
             return False
         elif status_obj.status == SessionStatus.INTERRUPT:
             return False
@@ -153,9 +131,9 @@ class RedisQueueManager(AbstractQueueManagerServer):
     
     async def push_result(self, result: TextFeatures):
         """Push inference result back to Redis pub/sub"""
-        status_obj = await self.get_status_object(result.sid)
+        status_obj = await self.get_status_object(result)
         status_obj.refresh_time()
-        await self.redis_client.hset(self.active_sessions_key, result.sid, status_obj.to_json())
+        await self.redis_client.hset(f"{result.agent_name}:{self.active_sessions_key}", result.sid, status_obj.to_json())
         # calculate next service and queue name
         next_service = go_next_service(current_stage_name=self.service_name,
                         service_names=status_obj.service_names,
@@ -172,10 +150,11 @@ class InferenceService(AbstractInferenceServer):
         redis_url: str = "redis://localhost:6379",
         max_batch_size: int = 16,
         max_wait_time: float = 0.1,
-        queue_name: str = "call_agent"
+        service_name:str="STT"
     ):
         super().__init__()
-        self.queue_manager = RedisQueueManager(redis_url, queue_name=queue_name)
+        self.service_name = service_name
+        self.queue_manager = RedisQueueManager(redis_url, service_name= self.service_name)
         self.batch_manager = DynamicBatchManager(max_batch_size, max_wait_time)
         self.inference_engine = WhisperAsyncBatchInference(max_worker=max_worker)
 
@@ -185,7 +164,7 @@ class InferenceService(AbstractInferenceServer):
     
     async def _initialize_components(self):
         await self.queue_manager.initialize()
-        # await self.inference_engine.model_manager.initialize()
+    
     
     async def start(self) -> None:
         """Start the inference service."""
@@ -214,7 +193,10 @@ class InferenceService(AbstractInferenceServer):
                     logger.info(f"Processed batch of {len(batch)} requests in {processing_time:.3f}s")
                 else:
                     await asyncio.sleep(0.01)
-                
+            
             except Exception as e:
                 logger.error(f"Error in batch processing loop: {e}")
                 await asyncio.sleep(0.1)
+                
+                
+                

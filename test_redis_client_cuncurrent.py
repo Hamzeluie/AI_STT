@@ -14,8 +14,10 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Adjust this import to match your project structure
 # You may need to add your project root to sys.path
-from AI_VAD.models.abstract_models import *  # <-- ADJUST THIS
-from AI_VAD.models.abstract_models import transform_priority_name  # if needed
+from agent_architect.models_abstraction import AbstractAsyncModelInference, AbstractQueueManagerServer, AbstractInferenceServer, DynamicBatchManager
+from agent_architect.datatype_abstraction import AudioFeatures, Features
+from agent_architect.session_abstraction import AgentSessions, SessionStatus
+from agent_architect.utils import go_next_service
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -26,7 +28,7 @@ OUTPUT_CHANNELS = ["STT:high", "STT:low"]
 
 
 SAMPLE_RATE = int(os.getenv("VAD_SAMPLE_RATE", 16000))
-AGENT_NAME = "CALL"
+AGENT_NAME = "call"
 SERVICE_NAMES = ["VAD","STT","RAG","TTS"]
 CHANNEL_STEPS = {"VAD":["input"],"STT":["high", "low"], "RAG":["high", "low"],"TTS":["high","low"]}
 INPUT_CHANNEL =f"{SERVICE_NAMES[0]}:{CHANNEL_STEPS[SERVICE_NAMES[0]][0]}"
@@ -35,7 +37,7 @@ OUTPUT_CHANNEL = f"{AGENT_NAME.lower()}:output"
 
 
 # Session timeout key (must match your service)
-ACTIVE_SESSIONS_KEY = "call_agent:active_sessions"
+ACTIVE_SESSIONS_KEY = f"{AGENT_NAME}:active_sessions"
 
 
 async def load_wav_as_int16_base64(file_path: Path) -> str:
@@ -79,6 +81,7 @@ async def publish_requests(redis_client, wav_files: List[Path], num_sessions: in
         
         audio_feat = AudioFeatures(
             sid=sid,
+            agent_name=AGENT_NAME,
             audio=audio_b64,
             sample_rate=16000,
             priority= f"{priority}",
