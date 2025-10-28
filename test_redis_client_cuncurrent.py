@@ -28,16 +28,16 @@ OUTPUT_CHANNELS = ["STT:high", "STT:low"]
 
 
 SAMPLE_RATE = int(os.getenv("VAD_SAMPLE_RATE", 16000))
-AGENT_NAME = "call"
+AGENT_TYPE = "call"
 SERVICE_NAMES = ["VAD","STT","RAG","TTS"]
 CHANNEL_STEPS = {"VAD":["input"],"STT":["high", "low"], "RAG":["high", "low"],"TTS":["high","low"]}
 INPUT_CHANNEL =f"{SERVICE_NAMES[0]}:{CHANNEL_STEPS[SERVICE_NAMES[0]][0]}"
-OUTPUT_CHANNEL = f"{AGENT_NAME.lower()}:output"
+OUTPUT_CHANNEL = f"{AGENT_TYPE.lower()}:output"
 
 
 
 # Session timeout key (must match your service)
-ACTIVE_SESSIONS_KEY = f"{AGENT_NAME}:active_sessions"
+ACTIVE_SESSIONS_KEY = f"{AGENT_TYPE}:active_sessions"
 
 
 async def load_wav_as_int16_base64(file_path: Path) -> str:
@@ -60,17 +60,19 @@ async def publish_requests(redis_client, wav_files: List[Path], num_sessions: in
 
     # Mark sessions as active
     for sid in sids:
-        agent_session = AgentSessions(sid=sid,
-                      owner_id="",
-                      kb_id=[],
-                      kb_limit=5,
-                      agent_name=AGENT_NAME, 
+        agent_session = AgentSessions(
+                      sid=sid,
+                      agent_type=AGENT_TYPE,
+                      agent_id='AGENT_ID',
                       service_names=SERVICE_NAMES,
                       channels_steps=CHANNEL_STEPS,
+                      owner_id="+12345952496",
                       status=SessionStatus.ACTIVE,
+                      timeout=3000.0,
                       first_channel=INPUT_CHANNEL,
                       last_channel=OUTPUT_CHANNEL,
-                      timeout=3000)
+                      created_at=None
+                      )
         await redis_client.hset(ACTIVE_SESSIONS_KEY, sid, agent_session.to_json())
 
     tasks = []
@@ -81,11 +83,12 @@ async def publish_requests(redis_client, wav_files: List[Path], num_sessions: in
         
         audio_feat = AudioFeatures(
             sid=sid,
-            agent_name=AGENT_NAME,
+            agent_type=AGENT_TYPE,
             audio=audio_b64,
             sample_rate=16000,
             priority= f"{priority}",
-            created_at=None
+            created_at=None,
+            is_final=False
         )
         channel = f"STT:{priority}"
         logger.info(f"Publishing {wav_file.name} (sid={sid}, priority={priority}) to {channel}, create_at {audio_feat.created_at}")
@@ -125,7 +128,8 @@ async def listen_for_results(redis_client, expected_count: int, timeout: int = 6
 
 
 async def main(timeout: int = 60):
-    input_dir = "/home/mehdi/Documents/projects/tts/test/test_wav"
+    # input_dir = "/home/mehdi/Documents/projects/tts/test/test_wav"
+    input_dir = "/home/ubuntu/borhan/whole_pipeline/vexu/test_voices"
     # input_dir = "/home/mehdi/Documents/projects/tts/tmp/corrupted"
     input_path = Path(input_dir)
     if not input_path.is_dir():
