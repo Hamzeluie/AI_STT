@@ -34,3 +34,4 @@ torch = ">=2.8.0,<3.0.0"
 torchvision = ">=0.23.0,<0.24.0"
 torchaudio = ">=2.8.0,<3.0.0"
 agent-architect = {git = "https://github.com/Hamzeluie/agent_architect.git", rev = "main"}
+typing-extensions = ">=4.6.0"

@@ -62,9 +62,11 @@ class WhisperAsyncBatchInference(AbstractAsyncModelInference):
             audio_int16 = np.frombuffer(audio_bytes, dtype=np.int16)
             audio_float32 = audio_int16.astype(np.float32) / 32768.0
             segments, info = self.model.transcribe(
-                audio=audio_float32, beam_size=5, language="en"
+                audio=audio_float32, beam_size=5, language="en", hotwords="NOTHING"
             )
             output_text = "".join([s.text for s in segments]).strip()
+            print(f"Transcription info: {output_text}")
+            output_text = output_text.replace("NOTHING", "")
             print(f"Result for {audio_object.sid}: {output_text}")
             if len(output_text):
                 results.append(
@@ -120,7 +122,9 @@ class RedisQueueManager(AbstractQueueManagerServer):
         if status_obj is None:
             return False
         # change status of the session to 'stop' if the session expired
+        print(f"🎃 Session {req.sid} status: {status_obj.status}")
         if status_obj.is_expired():
+            print(f"🤖 Session {req.sid} status: {status_obj.status}")
             status_obj.status = SessionStatus.STOP
             await self.redis_client.hset(
                 f"{req.agent_type}:{self.active_sessions_key}",
@@ -129,6 +133,7 @@ class RedisQueueManager(AbstractQueueManagerServer):
             )
             return False
         elif status_obj.status == SessionStatus.INTERRUPT:
+            print(f"🎉 Session {req.sid} status: {status_obj.status}")
             return False
         return True
 
@@ -164,6 +169,9 @@ class RedisQueueManager(AbstractQueueManagerServer):
 
     async def push_result(self, result: TextFeatures):
         """Push inference result back to Redis pub/sub"""
+        if not await self.is_session_active(result):
+            logger.info(f"Not pushing result for inactive session: {result.sid}")
+            return
         status_obj = await self.get_status_object(result)
         status_obj.refresh_time()
         await self.redis_client.hset(
@@ -226,9 +234,8 @@ class InferenceService(AbstractInferenceServer):
                     batch_results = await self.inference_engine.process_batch(batch)
                     processing_time = time.time() - start_time
                     for result_object in batch_results:
-                        if await self.is_session_active(result_object):
-                            # update create_at time of the session
-                            await self.queue_manager.push_result(result=result_object)
+                        # update create_at time of the session
+                        await self.queue_manager.push_result(result=result_object)
 
                     self.batch_manager.update_metrics(len(batch), processing_time)
                     logger.info(
