@@ -7,6 +7,7 @@ from typing import List
 
 import numpy as np
 import redis.asyncio as redis
+import scipy.signal
 from agent_architect.datatype_abstraction import AudioFeatures, Features, TextFeatures
 from agent_architect.models_abstraction import (
     AbstractAsyncModelInference,
@@ -23,18 +24,54 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+class ServerConfig:
+    HPF_CUTOFF_FREQ_HZ: int = 295  # get from config.yaml
+    HPF_ORDER: int = 2  # get from config.yaml
+    NORMALIZATION_TARGET_PEAK: float = 0.95  # get from config.yaml
+    SAMPLE_RATE: int = 16000  # get from config.yaml
+
+
 class WhisperAsyncBatchInference(AbstractAsyncModelInference):
     """
     Asynchronous Whisper inference with dynamic batching using faster-whisper's BatchedInferencePipeline.
     Accepts VAD speech segments as base64-encoded int16 PCM at 16kHz.
     """
 
-    def __init__(self, model_name: str = "large-v3", max_worker: int = 4):
+    def __init__(
+        self, model_name: str = "large-v3", max_worker: int = 4, config=ServerConfig
+    ):
         super().__init__(max_worker=max_worker)
         print("Loading Whisper model...")
-        whisper_model = WhisperModel(model_name, device="cuda", compute_type="float16")
-        self.model = BatchedInferencePipeline(model=whisper_model)
+        self.model = WhisperModel(model_name, device="cuda", compute_type="float16")
+        # whisper_model = WhisperModel(model_name, device="cuda", compute_type="float16")
+        # self.model = BatchedInferencePipeline(model=whisper_model)
+        self.config = config
+        self.b_hpf, self.a_hpf = None, None
+        self._design_hpf()
         print("Whisper model loaded successfully.")
+
+    def _design_hpf(self):
+        try:
+            nyquist = 0.5 * self.config.SAMPLE_RATE
+            normal_cutoff = self.config.HPF_CUTOFF_FREQ_HZ / nyquist
+            self.b_hpf, self.a_hpf = scipy.signal.butter(
+                self.config.HPF_ORDER, normal_cutoff, btype="high", analog=False
+            )
+            print(
+                f"Designed HPF: Cutoff={self.config.HPF_CUTOFF_FREQ_HZ} Hz, Order={self.config.HPF_ORDER}"
+            )
+        except Exception as e:
+            print(f"Failed to design High-Pass Filter: {e}")
+            self.b_hpf, self.a_hpf = None, None
+
+    def _process_audio_for_asr(self, audio_data_int16: np.ndarray) -> np.ndarray:
+        """Applies HPF and normalization to raw audio data."""
+        audio_float32 = audio_data_int16.astype(np.float32)
+        filtered_audio = scipy.signal.filtfilt(self.b_hpf, self.a_hpf, audio_float32)
+        peak = np.max(np.abs(filtered_audio))
+        if peak > 1e-6:
+            return filtered_audio / peak * self.config.NORMALIZATION_TARGET_PEAK
+        return filtered_audio
 
     async def process_batch(self, batch: List[AudioFeatures]) -> List[TextFeatures]:
         """Process a batch of requests asynchronously."""
@@ -47,7 +84,7 @@ class WhisperAsyncBatchInference(AbstractAsyncModelInference):
         except Exception as e:
             return await self._handle_batch_error(batch, e)
 
-    def _run_model_inference(
+    async def _run_model_inference(
         self, prepared_inputs: List[AudioFeatures]
     ) -> List[TextFeatures]:
         results = []
@@ -57,13 +94,22 @@ class WhisperAsyncBatchInference(AbstractAsyncModelInference):
                 raise ValueError(
                     f"Request {audio_object.sid}: Expected 16kHz audio, got {audio_object.sample_rate}"
                 )
-
             audio_bytes = base64.b64decode(audio_object.audio)
             audio_int16 = np.frombuffer(audio_bytes, dtype=np.int16)
-            audio_float32 = audio_int16.astype(np.float32) / 32768.0
-            segments, info = self.model.transcribe(
-                audio=audio_float32, beam_size=5, language="en", hotwords="NOTHING"
+
+            processed_audio = await asyncio.to_thread(
+                self._process_audio_for_asr, audio_int16
             )
+            segments, info = await asyncio.to_thread(
+                self.model.transcribe,
+                processed_audio,
+                beam_size=10,
+                without_timestamps=True,
+                vad_filter=False,
+                language="en",
+                hotwords="Fadi",
+            )
+
             output_text = "".join([s.text for s in segments]).strip()
             print(f"Transcription info: {output_text}")
             output_text = output_text.replace("NOTHING", "")
@@ -231,7 +277,9 @@ class InferenceService(AbstractInferenceServer):
                 )
                 if batch:
                     start_time = time.time()
-                    batch_results = await self.inference_engine.process_batch(batch)
+                    batch_results = await self.inference_engine._run_model_inference(
+                        batch
+                    )
                     processing_time = time.time() - start_time
                     for result_object in batch_results:
                         # update create_at time of the session
