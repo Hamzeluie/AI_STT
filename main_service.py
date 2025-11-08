@@ -219,7 +219,6 @@ class RedisQueueManager(AbstractQueueManagerServer):
             logger.info(f"Not pushing result for inactive session: {result.sid}")
             return
         status_obj = await self.get_status_object(result)
-        status_obj.refresh_time()
         await self.redis_client.hset(
             f"{result.agent_type}:{self.active_sessions_key}",
             result.sid,
