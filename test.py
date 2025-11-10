@@ -7,7 +7,6 @@ import librosa
 import numpy as np
 import soundfile as sf
 import websockets
-import yaml
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -15,9 +14,8 @@ load_dotenv()
 
 # WebSocket server URL
 WEBSOCKET_URL = (
-    f"ws://{os.getenv('HOST', 'localhost')}:{int(os.getenv('PORT', 5001))}/ws/stt"
+    f"ws://{os.getenv('HOST', 'localhost')}:{int(os.getenv('TEST_PORT', 8000))}/ws/stt"
 )
-WEBSOCKET_URL = "ws://localhost:5001/ws/stt"
 
 
 # Function to generate dummy audio data (sine wave)

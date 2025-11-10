@@ -21,9 +21,11 @@ jobs:
           # Set fallback defaults
           HOST_DEFAULT="0.0.0.0"
           PORT_DEFAULT="8000"
+          TEST_PORT_DEFAULT="5001"
 
           export HOST="$HOST_DEFAULT"
           export PORT="$PORT_DEFAULT"
+          export TEST_PORT="$TEST_PORT_DEFAULT"
 
           # Check if .env exists at that path
           if [ -f "$ENV_FILE" ]; then
@@ -32,20 +34,22 @@ jobs:
             source "$ENV_FILE"
             set +a
           else
-            echo "⚠️ .env not found at $ENV_FILE — using defaults: HOST=$HOST_DEFAULT, PORT=$PORT_DEFAULT"
+            echo "⚠️ .env not found at $ENV_FILE — using defaults: HOST=$HOST_DEFAULT, PORT=$PORT_DEFAULT ,  TEST_PORT=$TEST_PORT_DEFAULT"
           fi
 
+          
           # Validate
-          if [ -z "$HOST" ] || [ -z "$PORT" ]; then
-            echo "❌ Error: HOST or PORT is not set (even after fallback)"
+          if [ -z "$HOST" ] || [ -z "$PORT" ] || [ -z "$TEST_PORT" ]; then
+            echo "❌ Error: HOST, PORT or TEST_PORT is not set (even after fallback)"
             exit 1
           fi
 
-          echo "📌 Final config: HOST=$HOST, PORT=$PORT"
+          echo "📌 Final config: HOST=$HOST, PORT=$PORT, TEST_PORT=$TEST_PORT"
 
           # Save to GITHUB_ENV
           echo "HOST=$HOST" >> $GITHUB_ENV
           echo "PORT=$PORT" >> $GITHUB_ENV
+          echo "TEST_PORT=$TEST_PORT" >> $GITHUB_ENV
 
       - name: 🔍 Checkout repository
         uses: actions/checkout@v4
@@ -56,13 +60,13 @@ jobs:
 
       - name: Build Docker image
         run: |
-          docker build --no-cache -t vad-server:latest .
+          docker build --no-cache -t stt-server:latest .
       
       - name: Stop and remove previous container (optional)
         run: |
-          if [ $(docker ps -a -q -f name=vad-server-container) ]; then
-            docker stop vad-server-container || true
-            docker rm vad-server-container || true
+          if [ $(docker ps -a -q -f name=stt-server-container) ]; then
+            docker stop stt-server-container || true
+            docker rm stt-server-container || true
           fi
 
       - name: 🧹 Kill existing container using port ${{ env.PORT }}
@@ -100,28 +104,26 @@ jobs:
           echo "Starting container with HOST=${{ env.HOST }} PORT=${{ env.PORT }}"
           docker run -d \
             --gpus all \
-            --name vad-server-container \
+            --name stt-server-container \
             --restart unless-stopped \
-            -p "${{ env.PORT }}:${{ env.PORT }}" \
-            -e HOST="${{ env.HOST }}" \
-            -e PORT="${{ env.PORT }}" \
-            vad-server:latest
+            -p ${{ env.TEST_PORT }}:8000 \
+            stt-server:latest
       
       
             
       - name: 🧹 Cleanup old Docker images
         run: |
           echo "🧹 Removing dangling images..."
-          docker image prune -f
-      
-      
+          sudo docker container prune -f
+          sudo docker image prune -f
+
       - name: Show running containers
         run: docker ps
 
       - name: Output container logs (optional, for debugging)
         run: |
           sleep 5
-          docker logs vad-server-container
+          docker logs stt-server-container
 
 
 
@@ -140,25 +142,11 @@ jobs:
 
       - name: 📦 Install dependencies
         run: |
-          pip install websockets librosa soundfile numpy
+          poetry run pip install websockets librosa soundfile numpy python-dotenv
 
-      - name: 🧪 Run VAD WebSocket Test
+      - name: 🧪 Run stt WebSocket Test
         run: |
-          echo "Testing VAD server at ws://${{ env.HOST }}:${{ env.PORT }}/ws/vad"
+          echo "Testing stt server at ws://${{ env.HOST }}:${{ env.PORT }}/ws/stt"
           python test.py
   
-  
-  
-  
-  pushing_to_mehdi_origin:
-    runs-on: self-hosted
-    steps:
-      - name: 🔄 Push to Mehdi's Repository
-        run: |
-          # Only push if remote "mehdi" exists
-          if git remote | grep -q '^mehdi$'; then
-            echo "✅ Remote 'mehdi' found — pushing..."
-            git push mehdi develop
-          else
-            echo "⚠️ Remote 'mehdi' not found — skipping push."
-          fi
+      

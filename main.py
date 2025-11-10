@@ -202,6 +202,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
 @app.websocket(f"/ws/stt")
 async def openai_realtime_websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -238,7 +243,7 @@ if __name__ == "__main__":
 
     uvicorn.run(
         app,
-        host=os.getenv("HOST", "localhost"),
-        port=int(os.getenv("PORT", "5001")),
+        host=os.getenv("HOST", "0.0.0.0"),
+        port=int(os.getenv("PORT", "8000")),
         log_level="info",
     )
